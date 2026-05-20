@@ -1,5 +1,5 @@
 # 🃏 GAN FIFA Panini — FIFA World Cup 2026
-### Centro de Competencias Digitales · UNAB · Bucaramanga, Colombia
+### Maestría en Ciencia de datos · UNAB · Bucaramanga, Colombia
 
 > Proyecto educativo de **Deep Learning generativo**: entrena una DCGAN con rostros de futbolistas FIFA y genera tarjetas coleccionables estilo Panini usando una app web interactiva desplegada en Streamlit Cloud.
 

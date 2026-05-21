@@ -36,8 +36,8 @@ FOTO_W = FOTO_X2 - FOTO_X1     # 756 px
 FOTO_H = FOTO_Y2 - FOTO_Y1     # 880 px
 
 # Barras naranjas de texto (medidas reales del sticker)
-BARRA1_Y1, BARRA1_Y2 = 1295, 1420   # barra superior → NOMBRE
-BARRA2_Y1, BARRA2_Y2 = 1430, 1530   # barra inferior → datos
+BARRA1_Y1, BARRA1_Y2 = 1284, 1422   # barra superior → NOMBRE  (138 px alto)
+BARRA2_Y1, BARRA2_Y2 = 1436, 1503   # barra inferior → datos   (67 px alto)
 
 # ─── Carga del modelo con caché ──────────────────────────────────────────────
 @st.cache_resource(show_spinner="Cargando generador DCGAN…")
@@ -151,7 +151,7 @@ def componer_sticker(
 
     card.paste(foto, (FOTO_X1, FOTO_Y1), mask)
 
-    # ── 3. Cargar fuentes ─────────────────────────────────────────────────────
+    # ── 3. Fuentes y helper de texto ────────────────────────────────────────
     def fuente(size, bold=True):
         nombre_f = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
         try:
@@ -160,61 +160,45 @@ def componer_sticker(
         except Exception:
             return ImageFont.load_default()
 
-    fn_nombre = fuente(200, bold=True)
-    fn_dato   = fuente(150, bold=True)
-    fn_label  = fuente(10, bold=False)
+    def texto_centrado_autofit(draw, texto, y1, y2, size_max,
+                               color=(255,255,255), sombra=(0,0,0)):
+        """Centra el texto en la barra y reduce fuente si no cabe en el ancho."""
+        margen_x = 55
+        ancho_max = sw - margen_x * 2
+        size = size_max
+        fn = fuente(size)
+        while size > 18:
+            fn = fuente(size)
+            bb = draw.textbbox((0, 0), texto, font=fn)
+            if (bb[2] - bb[0]) <= ancho_max:
+                break
+            size -= 4
+        bb  = draw.textbbox((0, 0), texto, font=fn)
+        th  = bb[3] - bb[1]
+        tw  = bb[2] - bb[0]
+        tx  = (sw - tw) // 2
+        cy  = (y1 + y2) // 2
+        ty  = cy - th // 2
+        # Sombra negra gruesa en 6 direcciones para máximo contraste
+        for dx, dy in [(-2,-2),(2,-2),(-2,2),(2,2),(0,3),(3,0),(-3,0),(0,-3)]:
+            draw.text((tx+dx, ty+dy), texto, font=fn, fill=sombra)
+        draw.text((tx, ty), texto, font=fn, fill=color)
 
     draw = ImageDraw.Draw(card)
 
-    # ── 4. Helper: texto centrado con sombra ─────────────────────────────────
-    def texto_centrado(draw, texto, cy, font, color_texto, color_sombra=(40,15,0)):
-        bb  = draw.textbbox((0, 0), texto, font=font)
-        tw  = bb[2] - bb[0]
-        th  = bb[3] - bb[1]
-        tx  = (sw - tw) // 2
-        ty  = cy - th // 2
-        draw.text((tx+2, ty+2), texto, font=font, fill=color_sombra)
-        draw.text((tx,   ty  ), texto, font=font, fill=color_texto)
+    # ── 4. BARRA 1 → NOMBRE grande en blanco ─────────────────────────────────
+    texto_centrado_autofit(draw, nombre.upper(),
+                           BARRA1_Y1, BARRA1_Y2,
+                           size_max=110,
+                           color=(255, 255, 255), sombra=(0, 0, 0))
 
-    # ── 5. BARRA 1 → NOMBRE ──────────────────────────────────────────────────
-    cy1 = (BARRA1_Y1 + BARRA1_Y2) // 2
-    texto_centrado(draw, nombre.upper(), cy1, fn_nombre,
-                   color_texto=(255, 255, 255))
-
-    # ── 6. BARRA 2 → DATOS en dos líneas ─────────────────────────────────────
-    # La barra 2 tiene ~100px de alto; usamos fuente pequeña para dos líneas
-    # Línea A: fecha · altura · peso
-    # Línea B: club · país
-    barra2_h   = BARRA2_Y2 - BARRA2_Y1   # ≈100 px
-    margen_v   = 6
-
-    linea_a = f"{fecha_nac}   {altura}   {peso}"
-    linea_b = f"{club.upper()}   ·   {pais.upper()}"
-
-    # Ajustar tamaño para que ambas quepan
-    fn_d = fuente(30, bold=True)
-
-    bb_a = draw.textbbox((0,0), linea_a, font=fn_d)
-    bb_b = draw.textbbox((0,0), linea_b, font=fn_d)
-    th_a = bb_a[3] - bb_a[1]
-    th_b = bb_b[3] - bb_b[1]
-    total_h = th_a + margen_v + th_b
-
-    # Centrar verticalmente el bloque de dos líneas en la barra
-    bloque_top = BARRA2_Y1 + (barra2_h - total_h) // 2
-
-    # Línea A
-    tw_a = bb_a[2] - bb_a[0]
-    tx_a = (sw - tw_a) // 2
-    draw.text((tx_a+2, bloque_top+2),   linea_a, font=fn_d, fill=(40,15,0))
-    draw.text((tx_a,   bloque_top),     linea_a, font=fn_d, fill=(255, 248, 180))
-
-    # Línea B
-    tw_b = bb_b[2] - bb_b[0]
-    tx_b = (sw - tw_b) // 2
-    ty_b = bloque_top + th_a + margen_v
-    draw.text((tx_b+2, ty_b+2), linea_b, font=fn_d, fill=(40,15,0))
-    draw.text((tx_b,   ty_b  ), linea_b, font=fn_d, fill=(255, 220, 80))
+    # ── 5. BARRA 2 → datos en una línea, blanco, fuente grande autofit ───────
+    datos_linea = (f"{fecha_nac}  ·  {altura}  ·  {peso}  ·  "
+                   f"{club.upper()}  ·  {pais.upper()}")
+    texto_centrado_autofit(draw, datos_linea,
+                           BARRA2_Y1, BARRA2_Y2,
+                           size_max=60,
+                           color=(255, 255, 255), sombra=(0, 0, 0))
 
     return card
 
@@ -347,8 +331,8 @@ else:
             filtro       = filtro,
         )
 
-    # Mostrar centrado y grande (60% del ancho original = 718px)
-    ancho_display = 680
+    # Mostrar centrado y grande (~65% del ancho original)
+    ancho_display = 780
     alto_display  = int(tarjeta.height * ancho_display / tarjeta.width)
 
     col_left, col_mid, col_right = st.columns([1, 4, 1])

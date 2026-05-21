@@ -15,6 +15,7 @@ import tensorflow as tf
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 import io
 import os
+import urllib.request
 
 # ─── Configuración de página ─────────────────────────────────────────────────
 st.set_page_config(
@@ -29,13 +30,12 @@ MODEL_PATH   = "generador_fifa_ccd.keras"
 STICKER_PATH = "sticker.jpg"
 
 # ─── Coordenadas calibradas del sticker (1197 × 1600 px) ─────────────────────
-# Zona foto ampliada ×1.6 respecto al rectángulo morado original
 FOTO_X1, FOTO_Y1 = 253, 253
 FOTO_X2, FOTO_Y2 = 1009, 1133
 FOTO_W = FOTO_X2 - FOTO_X1     # 756 px
 FOTO_H = FOTO_Y2 - FOTO_Y1     # 880 px
 
-# Barras naranjas de texto (medidas reales del sticker)
+# Barras naranjas de texto
 BARRA1_Y1, BARRA1_Y2 = 1284, 1422   # barra superior → NOMBRE  (138 px alto)
 BARRA2_Y1, BARRA2_Y2 = 1436, 1503   # barra inferior → datos   (67 px alto)
 
@@ -59,16 +59,13 @@ def generar_imagen_gan(modelo, semilla: int) -> Image.Image:
 
 # ─── Filtros de fondo aplicables a la foto ───────────────────────────────────
 def aplicar_filtro(img: Image.Image, filtro: str) -> Image.Image:
-    """Aplica un filtro de fondo/estilo a la imagen del jugador."""
     img = img.convert("RGB")
     if filtro == "🎨 Sin filtro":
         return img
     elif filtro == "🔵 Fondo azul deportivo":
-        # Separa fondo oscuro y lo tinta azul intenso
         enhanced = ImageEnhance.Color(img).enhance(1.5)
         enhanced = ImageEnhance.Contrast(enhanced).enhance(1.3)
         overlay = Image.new("RGB", img.size, (10, 40, 120))
-        # Mezcla suave: zonas oscuras del original se ven azules
         arr = np.array(enhanced).astype(float)
         ov  = np.array(overlay).astype(float)
         luminance = (arr[:,:,0]*0.299 + arr[:,:,1]*0.587 + arr[:,:,2]*0.114) / 255
@@ -94,7 +91,6 @@ def aplicar_filtro(img: Image.Image, filtro: str) -> Image.Image:
         return Image.fromarray(sepia)
     elif filtro == "🌟 Neón FIFA":
         arr  = np.array(img).astype(float)
-        # Boost de canal verde y azul, bajamos rojo → look FIFA teal/cyan
         arr[:,:,0] = np.clip(arr[:,:,0] * 0.5, 0, 255)
         arr[:,:,1] = np.clip(arr[:,:,1] * 1.3, 0, 255)
         arr[:,:,2] = np.clip(arr[:,:,2] * 1.5, 0, 255)
@@ -110,6 +106,43 @@ def aplicar_filtro(img: Image.Image, filtro: str) -> Image.Image:
         img2 = Image.fromarray(blended.clip(0,255).astype(np.uint8))
         return ImageEnhance.Contrast(img2).enhance(1.2)
     return img
+
+# ─── Fuente con fallback robusto ─────────────────────────────────────────────
+def fuente(size, bold=True):
+    nombre_f = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    dest = f"/tmp/{nombre_f}"
+
+    # 1. Si ya fue descargada antes, usarla directamente
+    if os.path.exists(dest):
+        try:
+            return ImageFont.truetype(dest, size)
+        except Exception:
+            pass
+
+    # 2. Buscar en rutas del sistema
+    rutas = [
+        nombre_f,  # raíz del proyecto
+        f"/usr/share/fonts/truetype/dejavu/{nombre_f}",
+        f"/usr/share/fonts/dejavu/{nombre_f}",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+    for ruta in rutas:
+        try:
+            return ImageFont.truetype(ruta, size)
+        except Exception:
+            continue
+
+    # 3. Descargar desde GitHub
+    url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf"
+    try:
+        urllib.request.urlretrieve(url, dest)
+        return ImageFont.truetype(dest, size)
+    except Exception:
+        pass
+
+    # 4. Último recurso — fuente bitmap
+    return ImageFont.load_default()
 
 # ─── Composición del sticker ─────────────────────────────────────────────────
 def componer_sticker(
@@ -138,60 +171,58 @@ def componer_sticker(
     # ── 2. Máscara de bordes suavizados ──────────────────────────────────────
     mask = Image.new("L", (FOTO_W, FOTO_H), 255)
     md   = ImageDraw.Draw(mask)
-    r    = 22   # radio de esquinas
-    # Bordes superior, izquierdo, derecho, inferior → negros para fade
+    r    = 22
     for i in range(r):
-        t = int(255 * (i / r) ** 2)   # gradiente cuadrático
-        inv = 255 - t
-        md.rectangle([0,         i,         FOTO_W,     i+1     ], fill=t)
-        md.rectangle([0,         FOTO_H-i-1, FOTO_W,    FOTO_H-i], fill=t)
-        md.rectangle([i,         0,         i+1,        FOTO_H  ], fill=t)
-        md.rectangle([FOTO_W-i-1, 0,        FOTO_W-i,  FOTO_H  ], fill=t)
+        t = int(255 * (i / r) ** 2)
+        md.rectangle([0,          i,          FOTO_W,     i+1      ], fill=t)
+        md.rectangle([0,          FOTO_H-i-1, FOTO_W,     FOTO_H-i ], fill=t)
+        md.rectangle([i,          0,          i+1,        FOTO_H   ], fill=t)
+        md.rectangle([FOTO_W-i-1, 0,          FOTO_W-i,   FOTO_H   ], fill=t)
     mask = mask.filter(ImageFilter.GaussianBlur(radius=14))
 
     card.paste(foto, (FOTO_X1, FOTO_Y1), mask)
 
-    # ── 3. Fuentes y helper de texto ────────────────────────────────────────
-    def fuente(size, bold=True):
-        nombre_f = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-        try:
-            return ImageFont.truetype(
-                f"/usr/share/fonts/truetype/dejavu/{nombre_f}", size)
-        except Exception:
-            return ImageFont.load_default()
+    draw = ImageDraw.Draw(card)
 
+    # ── 3. Helper de texto centrado con autofit ───────────────────────────────
     def texto_centrado_autofit(draw, texto, y1, y2, size_max,
-                               color=(255,255,255), sombra=(0,0,0)):
-        """Llena la barra con el texto lo más grande posible (ancho Y alto)."""
-        margen_x  = 55
-        margen_v  = 10
+                               color=(255, 255, 255), sombra=(0, 0, 0)):
+        """Rellena la barra con el texto lo más grande posible."""
+        margen_x  = 40
+        margen_v  = 8
         ancho_max = sw - margen_x * 2
-        alto_max  = (y2 - y1) - margen_v * 2   # alto disponible en la barra
-        size = size_max
+        alto_barra = y2 - y1
+
+        # Arrancar desde un tamaño proporcional al alto de la barra
+        size = min(size_max, int(alto_barra * 0.75))
+
         fn = fuente(size)
-        while size > 18:
+
+        while size > 14:
             fn = fuente(size)
             bb = draw.textbbox((0, 0), texto, font=fn)
             ancho_txt = bb[2] - bb[0]
             alto_txt  = bb[3] - bb[1]
-            if ancho_txt <= ancho_max and alto_txt <= alto_max:
+
+            if ancho_txt <= ancho_max and alto_txt <= (alto_barra - margen_v * 2):
                 break
-            size -= 4
+            size -= 2   # pasos finos para mejor ajuste
+
+        fn  = fuente(size)
         bb  = draw.textbbox((0, 0), texto, font=fn)
         th  = bb[3] - bb[1]
         tw  = bb[2] - bb[0]
         tx  = (sw - tw) // 2
         cy  = (y1 + y2) // 2
-        ty  = cy - th // 2
-        # Sombra negra gruesa en 8 direcciones para máximo contraste
-        grosor = max(2, size // 30)
-        for dx in range(-grosor, grosor+1):
-            for dy in range(-grosor, grosor+1):
-                if dx != 0 or dy != 0:
-                    draw.text((tx+dx, ty+dy), texto, font=fn, fill=sombra)
-        draw.text((tx, ty), texto, font=fn, fill=color)
+        ty  = cy - th // 2 - bb[1]  # corrige offset vertical del bbox
 
-    draw = ImageDraw.Draw(card)
+        # Sombra negra en 8 direcciones
+        grosor = max(2, size // 25)
+        for dx in range(-grosor, grosor + 1):
+            for dy in range(-grosor, grosor + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((tx + dx, ty + dy), texto, font=fn, fill=sombra)
+        draw.text((tx, ty), texto, font=fn, fill=color)
 
     # ── 4. BARRA 1 → NOMBRE grande en blanco ─────────────────────────────────
     texto_centrado_autofit(draw, nombre.upper(),
@@ -199,7 +230,7 @@ def componer_sticker(
                            size_max=500,
                            color=(255, 255, 255), sombra=(0, 0, 0))
 
-    # ── 5. BARRA 2 → datos en una línea, blanco, fuente grande autofit ───────
+    # ── 5. BARRA 2 → datos en una línea ──────────────────────────────────────
     datos_linea = (f"{fecha_nac}  ·  {altura}  ·  {peso}  ·  "
                    f"{club.upper()}  ·  {pais.upper()}")
     texto_centrado_autofit(draw, datos_linea,
@@ -242,7 +273,6 @@ if modo_imagen == "🤖 Rostro generado por IA (DCGAN)":
 
     col_g1, col_g2 = st.columns([1, 3])
     with col_g1:
-        # Mostrar preview más grande (×4)
         st.image(img_gan.resize((256, 256), Image.NEAREST),
                  caption=f"Semilla {semilla}", width=256)
     with col_g2:
@@ -259,7 +289,7 @@ else:
     foto_raw = None
     if metodo == "📁 Subir imagen":
         arch = st.file_uploader("Sube tu foto (JPG, PNG)",
-                                type=["jpg","jpeg","png"],
+                                type=["jpg", "jpeg", "png"],
                                 label_visibility="collapsed")
         if arch:
             foto_raw = Image.open(arch).convert("RGB")
@@ -271,8 +301,8 @@ else:
     if foto_raw is not None:
         w_f, h_f = foto_raw.size
         lado = min(w_f, h_f)
-        foto_raw = foto_raw.crop(((w_f-lado)//2, (h_f-lado)//2,
-                                   (w_f+lado)//2, (h_f+lado)//2))
+        foto_raw = foto_raw.crop(((w_f - lado) // 2, (h_f - lado) // 2,
+                                   (w_f + lado) // 2, (h_f + lado) // 2))
         col_p1, col_p2 = st.columns([1, 3])
         with col_p1:
             st.image(foto_raw.resize((256, 256), Image.LANCZOS),
@@ -308,14 +338,14 @@ st.subheader("✏️ Paso 3 — Datos del jugador")
 
 col_a, col_b, col_c = st.columns(3)
 with col_a:
-    nombre    = st.text_input("👤 Nombre del jugador",    value="TU NOMBRE",  max_chars=22)
-    fecha_nac = st.text_input("📅 Fecha de nacimiento",   value="01-01-2000")
+    nombre    = st.text_input("👤 Nombre del jugador",  value="TU NOMBRE",  max_chars=22)
+    fecha_nac = st.text_input("📅 Fecha de nacimiento", value="01-01-2000")
 with col_b:
-    altura    = st.text_input("📏 Altura",                value="1,75 m")
-    peso      = st.text_input("⚖️ Peso",                  value="70 kg")
+    altura    = st.text_input("📏 Altura",              value="1,75 m")
+    peso      = st.text_input("⚖️ Peso",                value="70 kg")
 with col_c:
-    club      = st.text_input("🏟️ Club / Universidad",    value="UNAB FC")
-    pais      = st.text_input("🌍 País (3 letras)",        value="COL", max_chars=3)
+    club      = st.text_input("🏟️ Club / Universidad",  value="UNAB FC")
+    pais      = st.text_input("🌍 País (3 letras)",      value="COL", max_chars=3)
 
 # ── Paso 4: Generar sticker ───────────────────────────────────────────────────
 st.markdown("---")
@@ -338,7 +368,6 @@ else:
             filtro       = filtro,
         )
 
-    # Mostrar centrado y grande (~65% del ancho original)
     ancho_display = 780
     alto_display  = int(tarjeta.height * ancho_display / tarjeta.width)
 
@@ -350,12 +379,11 @@ else:
             use_column_width=False,
         )
 
-    # Descarga en resolución original
     buf = io.BytesIO()
     tarjeta.save(buf, format="PNG", dpi=(300, 300))
     buf.seek(0)
 
-    nombre_archivo = f"sticker_{nombre.replace(' ','_')}_{pais.upper()}.png"
+    nombre_archivo = f"sticker_{nombre.replace(' ', '_')}_{pais.upper()}.png"
     st.download_button(
         label     = "⬇️ Descargar sticker en alta resolución (300 DPI — 1197×1600 px)",
         data      = buf,

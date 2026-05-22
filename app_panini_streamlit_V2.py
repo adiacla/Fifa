@@ -246,7 +246,7 @@ def componer_sticker(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.title("🃏 Generador de Tarjeta Panini FIFA 2026")
-st.caption("Centro de Competencias Digitales · UNAB · Powered by DCGAN")
+st.caption("fACULTAD DE INGENIERÍA DE SISTEMAS · UNAB · Powered by DCGAN")
 
 sticker_base = cargar_sticker()
 
@@ -267,7 +267,7 @@ if modo_imagen == "🤖 Rostro generado por IA (DCGAN)":
     st.success("✅ Generador DCGAN listo")
 
     semilla = st.slider("🎲 Semilla — cada número produce un rostro diferente",
-                        0, 2000, 42, step=1)
+                        0, 20000, 42, step=1)
 
     img_gan = generar_imagen_gan(modelo, semilla)
 
